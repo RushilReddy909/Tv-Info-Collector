@@ -1,0 +1,34 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.tvinfo.collector'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.tvinfo.collector"
+        minSdk 21
+        // The TV runs Android 9 (API 28), so target that: no scoped-storage or
+        // package-visibility restrictions get in the way of reading system info.
+        targetSdk 28
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}
