@@ -12,9 +12,12 @@ setting, and writes them to a text report.
 
 Build fingerprint, board / hardware / chipset properties, all system properties (with the
 standby/boot/power ones listed first), kernel and partition info, deep-sleep time since boot
-(stays at 0 if the TV never truly suspends), Settings values, the list of system packages
-(including which partition they live on), and exported settings/power/factory-like screens.
-Nothing is launched.
+(stays at 0 if the TV never truly suspends), Settings values (Global, System, Secure), active
+TCP listening ports (`/proc/net/tcp`), deep inspection of hidden factory app components (Activities,
+Receivers, Services, Providers), the list of system packages, and exported screens.
+
+Additionally, version 2.0 automatically extracts the core system factory APKs
+(`SkyFactory.apk`, `FactoryWriteKey.apk`, etc.) into the output folder on your USB drive for JADX inspection.
 
 ## Building the APK
 

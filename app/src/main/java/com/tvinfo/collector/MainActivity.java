@@ -9,6 +9,7 @@ import android.content.pm.FeatureInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.content.pm.ServiceInfo;
 import android.database.Cursor;
 import android.graphics.Typeface;
 import android.net.Uri;
@@ -59,7 +60,7 @@ import java.util.regex.Pattern;
  */
 public class MainActivity extends Activity {
 
-    private static final String TOOL_VERSION = "1.0";
+    private static final String TOOL_VERSION = "2.0";
 
     /** Keys whose values are replaced with <redacted>. */
     private static final Pattern SENSITIVE = Pattern.compile(
@@ -290,6 +291,11 @@ public class MainActivity extends Activity {
 
         dumpSettings(sb, "Settings.Global", Settings.Global.CONTENT_URI);
         dumpSettings(sb, "Settings.System", Settings.System.CONTENT_URI);
+        dumpSettings(sb, "Settings.Secure", Settings.Secure.CONTENT_URI);
+
+        section(sb, "Active TCP listening ports (/proc/net/tcp)");
+        sb.append(dumpListeningPorts("/proc/net/tcp"));
+        sb.append(dumpListeningPorts("/proc/net/tcp6"));
 
         PackageManager pkgm = getPackageManager();
         section(sb, "System features");
@@ -386,6 +392,13 @@ public class MainActivity extends Activity {
         if (shown == 0) {
             sb.append("(none found)\n");
         }
+
+        section(sb, "Deep inspection of Factory and Agent Packages");
+        dumpPackageComponents(sb, pkgm, "com.smartdevice.factory");
+        dumpPackageComponents(sb, pkgm, "com.smartdevice.dtv.factorywritekey");
+        dumpPackageComponents(sb, pkgm, "com.mediatek.agent");
+        dumpPackageComponents(sb, pkgm, "com.mediatek.dmagent");
+        dumpPackageComponents(sb, pkgm, "mtktvapi.agent");
 
         return sb.toString();
     }
@@ -546,6 +559,113 @@ public class MainActivity extends Activity {
         }
     }
 
+    private static void dumpPackageComponents(StringBuilder sb, PackageManager pm, String pkgName) {
+        sb.append("\n--- Components of ").append(pkgName).append(" ---\n");
+        try {
+            PackageInfo pi = pm.getPackageInfo(pkgName,
+                    PackageManager.GET_ACTIVITIES |
+                    PackageManager.GET_RECEIVERS |
+                    PackageManager.GET_SERVICES |
+                    PackageManager.GET_PROVIDERS |
+                    PackageManager.GET_PERMISSIONS);
+
+            if (pi.activities != null) {
+                sb.append("Activities (").append(pi.activities.length).append("):\n");
+                for (ActivityInfo a : pi.activities) {
+                    sb.append("  [Activity] ").append(a.name)
+                      .append(" (exported=").append(a.exported)
+                      .append(a.permission != null ? ", perm=" + a.permission : "")
+                      .append(")\n");
+                }
+            }
+            if (pi.receivers != null) {
+                sb.append("Receivers (").append(pi.receivers.length).append("):\n");
+                for (ActivityInfo r : pi.receivers) {
+                    sb.append("  [Receiver] ").append(r.name)
+                      .append(" (exported=").append(r.exported)
+                      .append(r.permission != null ? ", perm=" + r.permission : "")
+                      .append(")\n");
+                }
+            }
+            if (pi.services != null) {
+                sb.append("Services (").append(pi.services.length).append("):\n");
+                for (ServiceInfo s : pi.services) {
+                    sb.append("  [Service] ").append(s.name)
+                      .append(" (exported=").append(s.exported)
+                      .append(s.permission != null ? ", perm=" + s.permission : "")
+                      .append(")\n");
+                }
+            }
+            if (pi.providers != null) {
+                sb.append("Providers (").append(pi.providers.length).append("):\n");
+                for (android.content.pm.ProviderInfo p : pi.providers) {
+                    sb.append("  [Provider] ").append(p.name)
+                      .append(" (auth=").append(p.authority)
+                      .append(", exported=").append(p.exported).append(")\n");
+                }
+            }
+        } catch (PackageManager.NameNotFoundException e) {
+            sb.append("(Package not installed)\n");
+        } catch (Throwable t) {
+            sb.append("(Error: ").append(t.getClass().getSimpleName()).append(": ").append(t.getMessage()).append(")\n");
+        }
+    }
+
+    private static String dumpListeningPorts(String procPath) {
+        StringBuilder sb = new StringBuilder();
+        String content = readFile(procPath, 64000);
+        for (String line : content.split("\n")) {
+            String[] parts = line.trim().split("\\s+");
+            // state 0A is TCP_LISTEN in /proc/net/tcp
+            if (parts.length > 3 && "0A".equalsIgnoreCase(parts[3])) {
+                String[] addr = parts[1].split(":");
+                if (addr.length == 2) {
+                    try {
+                        int port = Integer.parseInt(addr[1], 16);
+                        sb.append(procPath).append(" listening on port: ").append(port);
+                        if (port == 5555) {
+                            sb.append(" <--- ADB PORT IS OPEN!");
+                        }
+                        sb.append("\n");
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+        }
+        if (sb.length() == 0) {
+            sb.append(procPath).append(": (no listening ports found or unreadable)\n");
+        }
+        return sb.toString();
+    }
+
+    private static void copyApk(String srcPath, File destDir, String outName, List<String> saved) {
+        File src = new File(srcPath);
+        if (!src.exists() || !src.canRead()) {
+            return;
+        }
+        File dest = new File(destDir, outName);
+        FileInputStream in = null;
+        FileOutputStream out = null;
+        try {
+            in = new FileInputStream(src);
+            out = new FileOutputStream(dest);
+            byte[] buf = new byte[8192];
+            int len;
+            while ((len = in.read(buf)) > 0) {
+                out.write(buf, 0, len);
+            }
+            out.flush();
+            saved.add("Extracted APK: " + dest.getAbsolutePath());
+        } catch (Throwable ignored) {
+        } finally {
+            if (in != null) {
+                try { in.close(); } catch (Throwable ignored) {}
+            }
+            if (out != null) {
+                try { out.close(); } catch (Throwable ignored) {}
+            }
+        }
+    }
+
     // ------------------------------------------------------------------ saving
 
     private List<String> save(String report) {
@@ -572,6 +692,13 @@ public class MainActivity extends Activity {
                 fo.write(report.getBytes(StandardCharsets.UTF_8));
                 fo.flush();
                 saved.add(f.getAbsolutePath());
+
+                // Copy key factory APKs to the same directory
+                copyApk("/system/app/SkyFactory/SkyFactory.apk", d, "SkyFactory.apk", saved);
+                copyApk("/system/product/app/FactoryWriteKey/FactoryWriteKey.apk", d, "FactoryWriteKey.apk", saved);
+                copyApk("/system/product/app/TVRemoteserviceagent/TVRemoteserviceagent.apk", d, "TVRemoteserviceagent.apk", saved);
+                copyApk("/system/product/app/DMRemoteserviceagent/DMRemoteserviceagent.apk", d, "DMRemoteserviceagent.apk", saved);
+                copyApk("/system/product/app/mtktvapi_agent/mtktvapi_agent.apk", d, "mtktvapi_agent.apk", saved);
             } catch (Throwable ignored) {
                 // that volume is not writable; try the next one
             } finally {
@@ -584,6 +711,30 @@ public class MainActivity extends Activity {
                 }
             }
         }
+        // Also attempt writing directly to public Downloads folder if accessible
+        try {
+            File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+            if (downloadDir != null && (downloadDir.exists() || downloadDir.mkdirs())) {
+                FileOutputStream fo = null;
+                try {
+                    File f = new File(downloadDir, name);
+                    fo = new FileOutputStream(f);
+                    fo.write(report.getBytes(StandardCharsets.UTF_8));
+                    fo.flush();
+                    saved.add(f.getAbsolutePath());
+
+                    copyApk("/system/app/SkyFactory/SkyFactory.apk", downloadDir, "SkyFactory.apk", saved);
+                    copyApk("/system/product/app/FactoryWriteKey/FactoryWriteKey.apk", downloadDir, "FactoryWriteKey.apk", saved);
+                } catch (Throwable ignored) {
+                    // Falls back to app-specific dirs if permission is restricted
+                } finally {
+                    if (fo != null) {
+                        try { fo.close(); } catch (Throwable ignored) {}
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+
         return saved;
     }
 }
